@@ -386,4 +386,6 @@ int main(int argc, char *argv[]) {
 	fprintf(stdout, "Exiting ..\n");
 	clean_up_lockfile();
 	closelog();
+
+	return 0;
 }
