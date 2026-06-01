@@ -1046,6 +1046,7 @@ int cthd_gddv::parse_trt(char *buf, int len)
 //From ESIF/Products/ESIF_LIB/Sources/esif_lib_datavault.c
 #define ESIFDV_HEADER_SIGNATURE			0x1FE5
 #define ESIFDV_ITEM_KEYS_REV0_SIGNATURE	0xA0D8
+#define MAX_DATA_VAULT_SIZE	(512 * 1024)
 
 int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 
@@ -1064,6 +1065,11 @@ int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 				size - header->headersize);
 	if (res)
 		return THD_ERROR;
+
+	if (!destlen || destlen > MAX_DATA_VAULT_SIZE) {
+		thd_log_warn("Invalid or unsupported data vault size\n");
+		return THD_ERROR;
+	}
 
 	output_size = header->headersize + destlen;
 	std::unique_ptr<unsigned char[]> decompressed(new unsigned char[output_size]);
