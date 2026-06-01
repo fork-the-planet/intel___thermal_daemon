@@ -2027,42 +2027,77 @@ std::unique_ptr<char[]> cthd_gddv::gddv_load(size_t *size)
 	if (format_dv_filename(file_name_str) == THD_ERROR)
 		return {};
 
-	struct stat file_stat;
-
-	if (stat(file_name_str.str().c_str(), &file_stat) == -1) {
-		thd_log_info("Could not get file status for %s\n", file_name_str.str().c_str());
+	int fd = open(file_name_str.str().c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0) {
+		if (errno == ELOOP) {
+			thd_log_warn("Config file %s is a symlink\n",
+					file_name_str.str().c_str());
+		} else {
+			thd_log_info("Could not open file %s: %s\n",
+					file_name_str.str().c_str(), strerror(errno));
+		}
 		return {};
 	}
 
-	// Make sure file is owned by root and not writable by group/others
+	struct stat file_stat;
+	if (fstat(fd, &file_stat) == -1) {
+		thd_log_warn("Could not stat opened file %s: %s\n",
+				file_name_str.str().c_str(), strerror(errno));
+		close(fd);
+		return {};
+	}
+
+	// Verify file is owned by root and not writable by group/others
 	if (file_stat.st_uid != 0) {
 		thd_log_info("Config file %s is not owned by root\n", file_name_str.str().c_str());
+		close(fd);
 		return {};
 	}
 
 	if (file_stat.st_mode & (S_IWGRP | S_IWOTH)) {
 		thd_log_info("Config file %s is group, other writable\n", file_name_str.str().c_str());
+		close(fd);
 		return {};
 	}
 
-	csys_fs sysfs("");
-
-	size_t _size = sysfs.size(file_name_str.str().c_str());
-	if (_size == 0) {
-		thd_log_debug("Unable to open GDDV data vault\n");
+	// Verify it's a regular file (not device, FIFO, etc.)
+	if (!S_ISREG(file_stat.st_mode)) {
+		thd_log_warn("Config file %s is not a regular file\n", file_name_str.str().c_str());
+		close(fd);
 		return {};
 	}
 
-	if (_size > MAX_GDDV_FILE_SIZE)
-		_size = MAX_GDDV_FILE_SIZE;
+	size_t _size = file_stat.st_size;
+	if (_size == 0 || _size > MAX_GDDV_FILE_SIZE) {
+		thd_log_debug("GDDV data vault has invalid size: %zu\n", _size);
+		close(fd);
+		return {};
+	}
 
 	thd_log_debug("Found data vault file %s of size %zu\n", file_name_str.str().c_str(), _size);
 
-	if (sysfs.read(file_name_str.str().c_str(), data_buffer.get(), _size)
-			< int(_size)) {
-		thd_log_debug("Unable to read GDDV data vault\n");
-		return {};
+	// Read from the already-opened and validated file descriptor
+	// Loop to handle partial reads (POSIX read() may return short reads)
+	size_t total_read = 0;
+	while (total_read < _size) {
+		ssize_t n = ::read(fd, data_buffer.get() + total_read, _size - total_read);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;  // Interrupted by signal, retry
+			}
+			thd_log_warn("Read error loading GDDV: %s\n", strerror(errno));
+			close(fd);
+			return {};
+		}
+		if (n == 0) {
+			// EOF reached before reading full file
+			thd_log_warn("Unexpected EOF loading GDDV, read %zu of %zu bytes\n", total_read, _size);
+			close(fd);
+			return {};
+		}
+		total_read += n;
 	}
+	close(fd);
 
 	*size = _size;
 
