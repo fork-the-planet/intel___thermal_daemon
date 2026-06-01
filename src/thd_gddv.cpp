@@ -1047,6 +1047,7 @@ int cthd_gddv::parse_trt(char *buf, int len)
 #define ESIFDV_HEADER_SIGNATURE			0x1FE5
 #define ESIFDV_ITEM_KEYS_REV0_SIGNATURE	0xA0D8
 #define MAX_DATA_VAULT_SIZE	(512 * 1024)
+#define	MAX_GDDV_SEGMENTS	30
 
 int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 
@@ -1094,7 +1095,7 @@ int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 	header->v2.flags &= ~ESIF_SERVICE_CONFIG_COMPRESSED;
 	header->v2.payload_size = destlen;
 
-	res = parse_gddv((char*)decompressed.get(), output_size, nullptr);
+	res = parse_gddv((char*)decompressed.get(), output_size, nullptr, 0);
 
 	return res;
 }
@@ -1252,9 +1253,15 @@ int cthd_gddv::parse_gddv_key(char *buf, int size, int *end_offset) {
 	return THD_SUCCESS;
 }
 
-int cthd_gddv::parse_gddv(char *buf, int size, int *end_offset) {
+int cthd_gddv::parse_gddv(char *buf, int size, int *end_offset, int depth) {
 	int offset = 0;
 	struct header *header;
+
+	if (depth > MAX_GDDV_SEGMENTS) {
+		thd_log_warn("max segments %d exceeded maximum %d\n",
+				depth, MAX_GDDV_SEGMENTS);
+		return THD_ERROR;
+	}
 
 	if (size < (int) sizeof(struct header))
 		return THD_ERROR;
@@ -1311,7 +1318,7 @@ int cthd_gddv::parse_gddv(char *buf, int size, int *end_offset) {
 				offset += end_offset;
 			} else if (signature == ESIFDV_HEADER_SIGNATURE) {
 				thd_log_info("Got subobject in buf %p at %d\n", buf, offset);
-				res = parse_gddv(buf + offset, size - offset, &end_offset);
+				res = parse_gddv(buf + offset, size - offset, &end_offset, depth + 1);
 				if (res != THD_SUCCESS)
 					return res;
 
@@ -2142,7 +2149,7 @@ int cthd_gddv::gddv_init(std::string& base_path) {
 
 skip_load:
 	try {
-		if (parse_gddv(buf.get(), size, nullptr)) {
+		if (parse_gddv(buf.get(), size, nullptr, 0)) {
 			thd_log_debug("Unable to parse GDDV");
 			return THD_FATAL_ERROR;
 		}

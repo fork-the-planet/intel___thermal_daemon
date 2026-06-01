@@ -249,7 +249,7 @@ private:
 	void parse_trip_point(char *name, char *type, char *val, int len);
 	int handle_compressed_gddv(char *buf, int size);
 	int parse_gddv_key(char *buf, int size, int *end_offset);
-	int parse_gddv(char *buf, int size, int *end_offset);
+	int parse_gddv(char *buf, int size, int *end_offset, int depth = 0);
 	int verify_condition(const struct condition& condition);
 	int compare_condition(const struct condition& condition, int value);
 	int compare_time(const struct condition& condition);
