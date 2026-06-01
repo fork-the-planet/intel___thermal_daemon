@@ -910,7 +910,7 @@ void cthd_gddv::parse_idsp(char *name, char *start, int length) {
 		return;
 
 	while (i < length) {
-		char idsp[64];
+		char idsp[128];
 		std::string idsp_str;
 
 		// The minimum length for an IDSP should be at least 28
