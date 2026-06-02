@@ -47,6 +47,7 @@ int cthd_cdev_backlight::update() {
 	int ret;
 
 	if (cdev_sysfs.exists()) {
+		max_state = 0;  // Initialize before read
 		ret = cdev_sysfs.read("max_brightness", &max_state);
 		if (ret < 0)
 			return ret;

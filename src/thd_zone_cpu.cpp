@@ -66,6 +66,7 @@ int cthd_zone_cpu::init() {
 		temp_max_str << "temp" << i << "_max";
 
 		if (dts_sysfs.exists(temp_crit_str.str())) {
+			temp = 0;  // Initialize before read
 			int ret = dts_sysfs.read(temp_crit_str.str(), &temp);
 			if (ret < 0)
 				return ret;
@@ -79,6 +80,7 @@ int cthd_zone_cpu::init() {
 			// Set which index is present
 			sensor_mask = sensor_mask | (1 << i);
 
+			temp = 0;  // Initialize before read
 			int ret = dts_sysfs.read(temp_max_str.str(), &temp);
 			if (ret < 0)
 				return ret;

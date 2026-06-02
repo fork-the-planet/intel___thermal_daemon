@@ -179,6 +179,7 @@ int cthd_sysfs_cdev_rapl::rapl_read_pl1_max()
 	int current_pl1_max;
 
 	temp_power_str << "constraint_" << constraint_index << "_max_power_uw";
+	current_pl1_max = 0;  // Initialize before read
 	if (cdev_sysfs.read(temp_power_str.str(), &current_pl1_max) > 0) {
 		return current_pl1_max;
 	}
@@ -192,6 +193,7 @@ int cthd_sysfs_cdev_rapl::rapl_read_pl1()
 	int current_pl1;
 
 	temp_power_str << "constraint_" << constraint_index << "_power_limit_uw";
+	current_pl1 = 0;  // Initialize before read
 	if (cdev_sysfs.read(temp_power_str.str(), &current_pl1) > 0) {
 		return current_pl1;
 	}
@@ -256,6 +258,7 @@ int cthd_sysfs_cdev_rapl::rapl_read_time_window()
 	int tm_window;
 
 	temp_time_str << "constraint_" << constraint_index << "_time_window_us";
+	tm_window = 0;  // Initialize before read
 	if (cdev_sysfs.read(temp_time_str.str(), &tm_window) > 0) {
 		return tm_window;
 	}
@@ -316,6 +319,7 @@ int cthd_sysfs_cdev_rapl::rapl_read_enable_status()
 	int enable;
 
 	temp_str << "enabled";
+	enable = 0;  // Initialize before read
 	if (cdev_sysfs.read(temp_str.str(), &enable) > 0) {
 		return enable;
 	}
