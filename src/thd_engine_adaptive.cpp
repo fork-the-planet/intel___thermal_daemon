@@ -25,8 +25,12 @@
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <linux/input.h>
+#include <unistd.h>
+#include <cstdlib>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include "thd_engine_adaptive.h"
 #include "thd_sensor_rapl_power.h"
@@ -402,33 +406,32 @@ void cthd_engine_adaptive::set_int3400_target(struct adaptive_target &target) {
 		thd_log_info("set_int3400 target %s\n", target.argument.c_str());
 
 		psvt = gddv.find_psvt(target.argument);
-		if (!psvt) {
-			return;
-		}
+		if (psvt) {
+			if (!int3400_installed) {
+				for (unsigned int i = 0; i < zones.size(); ++i) {
+					cthd_zone *_zone = zones[i].get();
 
-		if (!int3400_installed) {
-			for (unsigned int i = 0; i < zones.size(); ++i) {
-				cthd_zone *_zone = zones[i].get();
+					// This is only for debug to plot power, so keep
+					if (_zone->get_zone_type() == "rapl_pkg_power" || _zone->get_zone_type() == "power_floor")
+						continue;
 
-				// This is only for debug to plot power, so keep
-				if (_zone->get_zone_type() == "rapl_pkg_power" || _zone->get_zone_type() == "power_floor")
-					continue;
+					_zone->zone_reset(1);
+					_zone->trip_delete_all();
 
-				_zone->zone_reset(1);
-				_zone->trip_delete_all();
-
-				if (_zone->zone_active_status())
-					_zone->set_zone_inactive();
+					if (_zone->zone_active_status())
+						_zone->set_zone_inactive();
+				}
 			}
-		}
 
-		for (int i = 0; i < (int) psvt->psvs.size(); i++) {
-			install_passive(&psvt->psvs[i]);
+			for (int i = 0; i < (int) psvt->psvs.size(); i++) {
+				install_passive(&psvt->psvs[i]);
+			}
+			int3400_installed = 1;
 		}
-		int3400_installed = 1;
 	}
 
-	psvt_consolidate();
+	if (int3400_installed)
+		psvt_consolidate();
 
 	thd_log_info("\n\n ZONE DUMP BEGIN\n");
 	int new_zone_count = 0;
@@ -444,10 +447,39 @@ void cthd_engine_adaptive::set_int3400_target(struct adaptive_target &target) {
 		thd_log_warn("Possibly some sensors in the PSVT are missing\n");
 		thd_log_warn("Restart in non adaptive mode via systemd\n");
 
-		std::ostringstream filename;
-		filename << TDRUNDIR << "/" << "ignore_adaptive";
-		csys_fs sysfs(filename.str().c_str());
-		sysfs.create();
+		char *resolved_rundir = realpath(TDRUNDIR, nullptr);
+		if (!resolved_rundir) {
+			thd_log_warn("Failed to resolve runtime dir %s: %s\n", TDRUNDIR,
+					strerror(errno));
+		} else {
+			int dir_fd = open(resolved_rundir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+			if (dir_fd < 0) {
+				thd_log_warn("Failed to open runtime dir %s: %s\n", resolved_rundir,
+						strerror(errno));
+			} else {
+				struct stat st;
+				if (fstat(dir_fd, &st) < 0) {
+					thd_log_warn("Failed to stat runtime dir %s: %s\n", resolved_rundir,
+							strerror(errno));
+				} else if (!S_ISDIR(st.st_mode)) {
+					thd_log_warn("Runtime path %s is not a directory\n", resolved_rundir);
+				} else if (st.st_uid != 0 || (st.st_mode & (S_IWGRP | S_IWOTH))) {
+					thd_log_warn("Insecure runtime dir permissions on %s (uid=%u mode=%o)\n",
+							resolved_rundir, st.st_uid, st.st_mode & 0777);
+				} else {
+					int fd = openat(dir_fd, "ignore_adaptive",
+							O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
+					if (fd < 0) {
+						thd_log_warn("Failed to create %s/ignore_adaptive securely: %s\n",
+								resolved_rundir, strerror(errno));
+					} else {
+						close(fd);
+					}
+				}
+				close(dir_fd);
+			}
+			free(resolved_rundir);
+		}
 		exit(EXIT_FAILURE);
 	}
 
