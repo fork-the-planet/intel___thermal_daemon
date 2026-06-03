@@ -279,7 +279,7 @@ public:
 	}
 
 	// User/External messages
-	int user_add_sensor(std::string name, std::string path);
+	int user_add_sensor(std::string name, const std::string& path);
 	cthd_sensor *user_get_sensor(unsigned int index);
 	cthd_zone *user_get_zone(unsigned int index);
 	int user_add_virtual_sensor(std::string name, std::string dep_sensor,
@@ -293,7 +293,7 @@ public:
 	int user_get_zone_status(const std::string& name, int *status);
 	int user_delete_zone(const std::string& name);
 
-	int user_add_cdev(std::string cdev_name, std::string cdev_path,
+	int user_add_cdev(std::string cdev_name, const std::string& cdev_path,
 			int min_state, int max_state, int step);
 	cthd_cdev *user_get_cdev(unsigned int index);
 

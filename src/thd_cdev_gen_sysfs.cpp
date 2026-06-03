@@ -34,6 +34,7 @@ int cthd_gen_sysfs_cdev::update() {
 			return THD_ERROR;
 		}
 
+		curr_state = 0;  // Initialize before read
 		int ret = cdev_sysfs.read("", &curr_state);
 		if (ret < 0)
 			return ret;

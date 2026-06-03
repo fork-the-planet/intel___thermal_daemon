@@ -619,6 +619,18 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 {
 	PrefObject *obj = PREF_OBJECT(user_data);
 	g_autoptr(GError) error = nullptr;
+	auto return_dbus_error = [&](const gchar *failed_method) {
+		if (error != nullptr) {
+			g_dbus_method_invocation_return_gerror(invocation, error);
+			return;
+		}
+
+		g_dbus_method_invocation_return_error(invocation,
+						      G_DBUS_ERROR,
+						      G_DBUS_ERROR_FAILED,
+						      "%s failed",
+						      failed_method);
+	};
 	
 	thd_log_debug("Dbus method called %s %s.\n", interface_name, method_name);
 
@@ -803,7 +815,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 							      &curr_state, &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetCdevInformation");
 			return;
 		}
 
@@ -822,7 +834,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 								&error);
 		
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetCurrentPreference");
 			return;
 		}
 
@@ -838,7 +850,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 		ret = thd_dbus_interface_get_sensor_count(obj, &count, &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetSensorCount");
 			return;
 		}
 
@@ -860,7 +872,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 								&path, &temp, &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetSensorInformation");
 			return;
 		}
 
@@ -881,7 +893,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 								&error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetSensorTemperature");
 			return;
 		}
 
@@ -897,7 +909,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 		ret = thd_dbus_interface_get_zone_count(obj, &count, &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetZoneCount");
 			return;
 		}
 
@@ -921,7 +933,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 							       &bound, &error);
 		
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetZoneInformation");
 			return;
 		}
 
@@ -946,7 +958,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 								  &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetZoneSensorAtIndex");
 			return;
 		}
 
@@ -966,7 +978,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 							 &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetZoneStatus");
 			return;
 		}
 
@@ -996,7 +1008,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 							        &cdev_size, &cdev_ids, &error);
 
 		if (error || !ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("GetZoneTripAtIndex");
 			return;
 		}
 
@@ -1037,7 +1049,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 		ret = thd_dbus_interface_set_current_preference(obj, pref, &error);
 
 		if (!ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("SetCurrentPreference");
 			return;
 		}
 
@@ -1060,7 +1072,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 								  &error);
 		
 		if (!ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("SetUserMaxTemperature");
 			return;
 		}
 		return;
@@ -1078,7 +1090,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 								      user_set_point_in_milli_degree_celsius,
 								      &error);
 		if (!ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("SetUserPassiveTemperature");
 			return;
 		}
 
@@ -1097,7 +1109,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 							 &error);
 
 		if (!ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("SetZoneStatus");
 			return;
 		}
 
@@ -1127,7 +1139,7 @@ thd_dbus_handle_method_call(GDBusConnection       *connection,
 							       step, &error);
 		
 		if (!ret) {
-			g_dbus_method_invocation_return_gerror(invocation, error);
+			return_dbus_error("UpdateCoolingDevice");
 			return;
 		}
 

@@ -28,6 +28,7 @@
 #include "thd_sensor.h"
 #include <atomic>
 #include <vector>
+#include <memory>
 
 typedef struct _link_sensor_t {
 	cthd_sensor *sensor;
@@ -45,7 +46,7 @@ struct polling_table_entry {
 
 class cthd_sensor_virtual: public cthd_sensor {
 private:
-	std::vector <link_sensor_t *> link_sensors;
+	std::vector <std::unique_ptr<link_sensor_t>> link_sensors;
 	double multiplier;
 	double offset;
 
@@ -74,7 +75,7 @@ public:
 		thd_log_info("Sensor:%s \n", type_str.c_str());
 
 		for (unsigned int i = 0; i < link_sensors.size(); ++i) {
-			link_sensor_t *link_sensor = link_sensors[i];
+			link_sensor_t *link_sensor = link_sensors[i].get();
 			if (link_sensor->sensor) {
 				thd_log_info("\tAdd target sensor %s, %g %g\n",
 					link_sensor->sensor->get_sensor_type().c_str(), link_sensor->coeff, link_sensor->offset);

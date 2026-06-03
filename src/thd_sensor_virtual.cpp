@@ -24,6 +24,7 @@
 #include "thd_sensor_virtual.h"
 #include "thd_engine.h"
 #include <cmath>
+#include <memory>
 
 cthd_sensor_virtual::cthd_sensor_virtual(int _index, std::string _type_str,
 		std::string& _link_type_str, double _multiplier, double _offset) :
@@ -33,16 +34,14 @@ cthd_sensor_virtual::cthd_sensor_virtual(int _index, std::string _type_str,
 		polling_period(def_polling_period) {
 
 	if (!_link_type_str.empty()) {
-		link_sensor_t *link_sensor = new (link_sensor_t);
-		if (!link_sensor)
-			return;
+		std::unique_ptr<link_sensor_t> link_sensor(new link_sensor_t());
 
 		cthd_sensor *sensor = thd_engine->search_sensor(_link_type_str);
 		link_sensor->sensor = sensor;
 		link_sensor->offset = 0;
 		link_sensor->coeff = 0;
 		link_sensor->prev_avg = 0.0;
-		link_sensors.push_back(link_sensor);
+		link_sensors.push_back(std::move(link_sensor));
 	}
 
 	virtual_sensor = true;
@@ -50,11 +49,7 @@ cthd_sensor_virtual::cthd_sensor_virtual(int _index, std::string _type_str,
 
 cthd_sensor_virtual::~cthd_sensor_virtual() {
 	disable_periodic_timer();
-
-	for (unsigned int i = 0; i < link_sensors.size(); ++i) {
-		link_sensor_t *link_sensor = link_sensors[i];
-		delete link_sensor;
-	}
+	// unique_ptr elements auto-delete, no manual cleanup needed
 	link_sensors.clear();
 }
 
@@ -63,16 +58,14 @@ int cthd_sensor_virtual::add_target(std::string& _link_type_str, double coeff, d
 		cthd_sensor *sensor = thd_engine->search_sensor(_link_type_str);
 		// If there is no sensor, this is treated as constant
 
-		link_sensor_t *link_sensor = new (link_sensor_t);
-		if (!link_sensor)
-			return THD_ERROR;
+		std::unique_ptr<link_sensor_t> link_sensor(new link_sensor_t());
 
 		link_sensor->sensor = sensor;
 		link_sensor->offset = offset;
 		link_sensor->coeff = coeff;
 		link_sensor->prev_avg = 0.0;
 		link_sensor->power_sensor = power_sensor;
-		link_sensors.push_back(link_sensor);
+		link_sensors.push_back(std::move(link_sensor));
 
 		return THD_SUCCESS;
 }
@@ -81,7 +74,7 @@ int cthd_sensor_virtual::sensor_update() {
 	thd_log_debug("Add virtual sensor %s\n", type_str.c_str());
 
 	for (unsigned int i = 0; i < link_sensors.size(); ++i) {
-		link_sensor_t *link_sensor = link_sensors[i];
+		link_sensor_t *link_sensor = link_sensors[i].get();
 
 		if (link_sensor->sensor) {
 			thd_log_debug("Add target sensor %s, %g %g\n",
@@ -112,25 +105,20 @@ unsigned int cthd_sensor_virtual::_read_temperature() {
 		return 0;
 	}
 
-	link_sensor_t *link_sensor = link_sensors[0];
+	link_sensor_t *link_sensor = link_sensors[0].get();
 
-	if (link_sensor && link_sensor->sensor && !link_sensor->coeff && !link_sensor->offset) {
-		link_sensor_t *link_sensor = link_sensors[0];
+	if (link_sensor->sensor && !link_sensor->coeff && !link_sensor->offset) {
+		temp = link_sensor->sensor->read_temperature();
+		temp = temp * multiplier + offset;
+		thd_log_debug("cthd_sensor_virtual::read_temperature %d\n", temp);
 
-		if (link_sensor->sensor) {
-			temp = link_sensor->sensor->read_temperature();
-			temp = temp * multiplier + offset;
-			thd_log_debug("cthd_sensor_virtual::read_temperature %u\n", temp);
-
-			return temp;
-		} else {
-			thd_log_debug("Virtual sensor %s has invalid linked sensor\n", type_str.c_str());
-			return 0;
-		}
+		unsigned int clamped_temp = temp < 0 ? 0u : static_cast<unsigned int>(temp);
+		last_temp.store(clamped_temp);
+		return clamped_temp;
 	}
 
 	for (unsigned int i = 0; i < link_sensors.size(); ++i) {
-		link_sensor_t *link_sensor = link_sensors[i];
+		link_sensor_t *link_sensor = link_sensors[i].get();
 		std::string link_sensor_name;
 
 		if (link_sensor->sensor) {
@@ -163,10 +151,14 @@ unsigned int cthd_sensor_virtual::_read_temperature() {
 
 	temp = static_cast<int>(std::round(virt_temp));
 
-	// always return in mC
-	last_temp.store(temp * 1000);
+	int temp_mc = temp * 1000;
+	if (temp_mc < 0)
+		temp_mc = 0;
 
-	return (int) temp;
+	// Keep cache and return value in the same unit (mC).
+	last_temp.store(temp_mc);
+
+	return static_cast<unsigned int>(temp_mc);
 }
 
 int cthd_sensor_virtual::sensor_update_param(const std::string& new_dep_sensor, double slope, double intercept)
@@ -175,13 +167,13 @@ int cthd_sensor_virtual::sensor_update_param(const std::string& new_dep_sensor, 
 
 
 	if (sensor) {
-		link_sensor_t *link_sensor = new (link_sensor_t);
+		std::unique_ptr<link_sensor_t> link_sensor(new link_sensor_t());
 
 		link_sensor->sensor = sensor;
 		link_sensor->offset = 0;
 		link_sensor->coeff = 0;
 		link_sensor->prev_avg = 0.0;
-		link_sensors.push_back(link_sensor);
+		link_sensors.push_back(std::move(link_sensor));
 
 	} else
 		return THD_ERROR;

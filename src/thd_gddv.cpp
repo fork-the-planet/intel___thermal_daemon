@@ -33,6 +33,7 @@
 #include <sstream>
 #include <sys/types.h>
 #include "thd_gddv.h"
+#include "thd_util.h"
 
 /* From esif_lilb_datavault.h */
 #define ESIFDV_NAME_LEN				32	// Max DataVault Name (Cache Name) Length (not including nullptr)
@@ -293,6 +294,8 @@ void cthd_gddv::dump_apat()
 	thd_log_info("apat dump end\n");
 }
 
+#define MAX_APCT_COUNT	128	
+
 int cthd_gddv::parse_apct(char *apct, int len) {
 	int i;
 	int offset = 0;
@@ -362,6 +365,13 @@ int cthd_gddv::parse_apct(char *apct, int len) {
 			}
 
 			uint64_t count = get_uint64(apct, &offset);
+
+			// Validate count to prevent excessive allocation or DoS
+			if (count > MAX_APCT_COUNT) {
+				thd_log_warn("APCT v2 count %llu exceeds maximum\n", (unsigned long long)count);
+				return THD_ERROR;
+			}
+
 			for (i = 0; i < int(count); i++) {
 				struct condition condition = {};
 
@@ -901,7 +911,7 @@ void cthd_gddv::parse_idsp(char *name, char *start, int length) {
 		return;
 
 	while (i < length) {
-		char idsp[64];
+		char idsp[128];
 		std::string idsp_str;
 
 		// The minimum length for an IDSP should be at least 28
@@ -1046,6 +1056,8 @@ int cthd_gddv::parse_trt(char *buf, int len)
 //From ESIF/Products/ESIF_LIB/Sources/esif_lib_datavault.c
 #define ESIFDV_HEADER_SIGNATURE			0x1FE5
 #define ESIFDV_ITEM_KEYS_REV0_SIGNATURE	0xA0D8
+#define MAX_DATA_VAULT_SIZE	(512 * 1024)
+#define	MAX_GDDV_SEGMENTS	30
 
 int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 
@@ -1064,6 +1076,11 @@ int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 				size - header->headersize);
 	if (res)
 		return THD_ERROR;
+
+	if (!destlen || destlen > MAX_DATA_VAULT_SIZE) {
+		thd_log_warn("Invalid or unsupported data vault size\n");
+		return THD_ERROR;
+	}
 
 	output_size = header->headersize + destlen;
 	std::unique_ptr<unsigned char[]> decompressed(new unsigned char[output_size]);
@@ -1088,7 +1105,7 @@ int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 	header->v2.flags &= ~ESIF_SERVICE_CONFIG_COMPRESSED;
 	header->v2.payload_size = destlen;
 
-	res = parse_gddv((char*)decompressed.get(), output_size, nullptr);
+	res = parse_gddv((char*)decompressed.get(), output_size, nullptr, 0);
 
 	return res;
 }
@@ -1246,9 +1263,15 @@ int cthd_gddv::parse_gddv_key(char *buf, int size, int *end_offset) {
 	return THD_SUCCESS;
 }
 
-int cthd_gddv::parse_gddv(char *buf, int size, int *end_offset) {
+int cthd_gddv::parse_gddv(char *buf, int size, int *end_offset, int depth) {
 	int offset = 0;
 	struct header *header;
+
+	if (depth > MAX_GDDV_SEGMENTS) {
+		thd_log_warn("max segments %d exceeded maximum %d\n",
+				depth, MAX_GDDV_SEGMENTS);
+		return THD_ERROR;
+	}
 
 	if (size < (int) sizeof(struct header))
 		return THD_ERROR;
@@ -1305,7 +1328,7 @@ int cthd_gddv::parse_gddv(char *buf, int size, int *end_offset) {
 				offset += end_offset;
 			} else if (signature == ESIFDV_HEADER_SIGNATURE) {
 				thd_log_info("Got subobject in buf %p at %d\n", buf, offset);
-				res = parse_gddv(buf + offset, size - offset, &end_offset);
+				res = parse_gddv(buf + offset, size - offset, &end_offset, depth + 1);
 				if (res != THD_SUCCESS)
 					return res;
 
@@ -1774,23 +1797,25 @@ struct itmt* cthd_gddv::find_itmt(const std::string& name) {
 	return nullptr;
 }
 
+#define MAX_PL_LIMIT	500000 // in mW
+
 int cthd_gddv::find_agressive_target() {
 	int max_pl1_max = 0;
 	int max_target_id = -1;
 
 	for (int i = 0; i < (int) targets.size(); i++) {
-		int argument;
-
 		if (targets[i].code != "PL1MAX" && targets[i].code != "PL1PowerLimit")
 			continue;
 
-		try {
-			argument = std::stoi(targets[i].argument, nullptr);
-		} catch (...) {
-			thd_log_info("Invalid target target:%s %s\n",
+		// Use utility function for validated parsing
+		// Value will be multiplied by 1000 in set_adaptive_target()
+		int argument;
+		if (parse_int_value(targets[i].argument, &argument, 0, MAX_PL_LIMIT) != 0) {
+			thd_log_warn("Invalid power limit for target:%s value:%s\n",
 					targets[i].code.c_str(), targets[i].argument.c_str());
 			continue;
 		}
+
 		thd_log_info("target:%s %d\n", targets[i].code.c_str(), argument);
 
 		if (max_pl1_max < argument) {
@@ -2021,42 +2046,77 @@ std::unique_ptr<char[]> cthd_gddv::gddv_load(size_t *size)
 	if (format_dv_filename(file_name_str) == THD_ERROR)
 		return {};
 
-	struct stat file_stat;
-
-	if (stat(file_name_str.str().c_str(), &file_stat) == -1) {
-		thd_log_info("Could not get file status for %s\n", file_name_str.str().c_str());
+	int fd = open(file_name_str.str().c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0) {
+		if (errno == ELOOP) {
+			thd_log_warn("Config file %s is a symlink\n",
+					file_name_str.str().c_str());
+		} else {
+			thd_log_info("Could not open file %s: %s\n",
+					file_name_str.str().c_str(), strerror(errno));
+		}
 		return {};
 	}
 
-	// Make sure file is owned by root and not writable by group/others
+	struct stat file_stat;
+	if (fstat(fd, &file_stat) == -1) {
+		thd_log_warn("Could not stat opened file %s: %s\n",
+				file_name_str.str().c_str(), strerror(errno));
+		close(fd);
+		return {};
+	}
+
+	// Verify file is owned by root and not writable by group/others
 	if (file_stat.st_uid != 0) {
 		thd_log_info("Config file %s is not owned by root\n", file_name_str.str().c_str());
+		close(fd);
 		return {};
 	}
 
 	if (file_stat.st_mode & (S_IWGRP | S_IWOTH)) {
 		thd_log_info("Config file %s is group, other writable\n", file_name_str.str().c_str());
+		close(fd);
 		return {};
 	}
 
-	csys_fs sysfs("");
-
-	size_t _size = sysfs.size(file_name_str.str().c_str());
-	if (_size == 0) {
-		thd_log_debug("Unable to open GDDV data vault\n");
+	// Verify it's a regular file (not device, FIFO, etc.)
+	if (!S_ISREG(file_stat.st_mode)) {
+		thd_log_warn("Config file %s is not a regular file\n", file_name_str.str().c_str());
+		close(fd);
 		return {};
 	}
 
-	if (_size > MAX_GDDV_FILE_SIZE)
-		_size = MAX_GDDV_FILE_SIZE;
+	size_t _size = file_stat.st_size;
+	if (_size == 0 || _size > MAX_GDDV_FILE_SIZE) {
+		thd_log_debug("GDDV data vault has invalid size: %zu\n", _size);
+		close(fd);
+		return {};
+	}
 
 	thd_log_debug("Found data vault file %s of size %zu\n", file_name_str.str().c_str(), _size);
 
-	if (sysfs.read(file_name_str.str().c_str(), data_buffer.get(), _size)
-			< int(_size)) {
-		thd_log_debug("Unable to read GDDV data vault\n");
-		return {};
+	// Read from the already-opened and validated file descriptor
+	// Loop to handle partial reads (POSIX read() may return short reads)
+	size_t total_read = 0;
+	while (total_read < _size) {
+		ssize_t n = ::read(fd, data_buffer.get() + total_read, _size - total_read);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;  // Interrupted by signal, retry
+			}
+			thd_log_warn("Read error loading GDDV: %s\n", strerror(errno));
+			close(fd);
+			return {};
+		}
+		if (n == 0) {
+			// EOF reached before reading full file
+			thd_log_warn("Unexpected EOF loading GDDV, read %zu of %zu bytes\n", total_read, _size);
+			close(fd);
+			return {};
+		}
+		total_read += n;
 	}
+	close(fd);
 
 	*size = _size;
 
@@ -2101,7 +2161,7 @@ int cthd_gddv::gddv_init(std::string& base_path) {
 
 skip_load:
 	try {
-		if (parse_gddv(buf.get(), size, nullptr)) {
+		if (parse_gddv(buf.get(), size, nullptr, 0)) {
 			thd_log_debug("Unable to parse GDDV");
 			return THD_FATAL_ERROR;
 		}
