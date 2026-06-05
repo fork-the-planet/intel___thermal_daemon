@@ -1088,7 +1088,7 @@ int cthd_gddv::handle_compressed_gddv(char *buf, int size) {
 		thd_log_warn("Failed to allocate buffer for decompressed output\n");
 		return THD_ERROR;
 	}
-	thd_log_debug("output size =%lu\n", output_size);
+	thd_log_debug("output size =%" PRIu64 "\n", output_size);
 
 	res=lzma_decompress((unsigned char*)(decompressed.get() + header->headersize),
 				&destlen,
