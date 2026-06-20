@@ -291,16 +291,16 @@ void cthd_engine::thd_parse_features()
 int cthd_engine::thd_engine_init(bool ignore_cpuid_check, bool adaptive) {
 	int ret;
 
-	if (check_acpi_platform_profile() != THD_SUCCESS) {
-		return THD_FATAL_ERROR;
-	}
-
 	adaptive_mode = adaptive;
 
 	if (ignore_cpuid_check) {
 		thd_log_debug("Ignore CPU ID check for MSRs\n");
 		proc_list_matched = true;
 	} else {
+		if (check_acpi_platform_profile() != THD_SUCCESS) {
+			return THD_FATAL_ERROR;
+		}
+
 		check_cpu_id();
 
 		if (!proc_list_matched) {
