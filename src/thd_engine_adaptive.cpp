@@ -660,9 +660,7 @@ int cthd_engine_adaptive::thd_engine_init(bool ignore_cpuid_check,
 	size_t size;
 	int res;
 
-	if (check_acpi_platform_profile() != THD_SUCCESS) {
-			return THD_FATAL_ERROR;
-	}
+	check_acpi_platform_profile();
 
 	thd_parse_features();
 

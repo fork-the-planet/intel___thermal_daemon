@@ -253,22 +253,19 @@ void cthd_engine::enable_power_floor_event()
 	++current_zone_index;
 }
 
-int cthd_engine::check_acpi_platform_profile() {
-	// Check PM profile and fail to start for non mobile platforms
+void cthd_engine::check_acpi_platform_profile() {
+	// Check PM profile and warn to start on non-mobile platforms
 	csys_fs pm_profile_fs("/sys/firmware/acpi/pm_profile");
 	if (pm_profile_fs.exists()) {
 		std::string pm_profile;
 		pm_profile_fs.read("", pm_profile);
 		thd_log_info("PM profile is %s\n", pm_profile.c_str());
 		if (pm_profile != "2" && pm_profile != "8") {
-			thd_log_error("Non mobile platform, exiting..\n");
-			return THD_FATAL_ERROR;
+			thd_log_warn("Non-mobile platform: thermal tables may not have been validated.\n");
 		}
 	} else {
 		thd_log_info("PM profile is not available, skipping check\n");
 	}
-
-	return THD_SUCCESS;
 }
 
 void cthd_engine::thd_parse_features()
@@ -297,10 +294,6 @@ int cthd_engine::thd_engine_init(bool ignore_cpuid_check, bool adaptive) {
 		thd_log_debug("Ignore CPU ID check for MSRs\n");
 		proc_list_matched = true;
 	} else {
-		if (check_acpi_platform_profile() != THD_SUCCESS) {
-			return THD_FATAL_ERROR;
-		}
-
 		check_cpu_id();
 
 		if (!proc_list_matched) {
@@ -311,6 +304,8 @@ int cthd_engine::thd_engine_init(bool ignore_cpuid_check, bool adaptive) {
 				return THD_ERROR;
 			}
 		}
+
+		check_acpi_platform_profile();
 	}
 
 	ret = read_thermal_sensors();

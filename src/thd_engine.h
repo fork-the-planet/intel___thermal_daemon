@@ -302,7 +302,7 @@ public:
 	void parser_deinit();
 	int debug_mode_on(void);
 
-	int check_acpi_platform_profile();
+	void check_acpi_platform_profile();
 
 	int check_feature(thermald_feature_names_t feature) {
 		if (feature >= MAX_FEATURE) {
